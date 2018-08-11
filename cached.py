@@ -10,7 +10,9 @@ class CachedFile():
         this.chunk_size = chunk_size
         this.join_str = b''
         this.size = -1
-
+        this.debug = True
+        this.total_read = 0
+        this.histo = {}
 
     def tell(this):
         this._log('tell')
@@ -46,6 +48,8 @@ class CachedFile():
     def read(this, size=None):
         this._log('read', size)
 
+        # 
+
         ret = [ ]
         org_pos = this.position
         first_chunk = this._chunk(this.position)
@@ -78,6 +82,12 @@ class CachedFile():
     def _get_chunk(this, n):
         this._log('_get_chunk', n)
 
+        if this.debug:
+            if n not in this.histo:
+                this.histo[n] = { 'read': 1, 'retrieved': 0 }
+            else:
+                this.histo[n]['read'] += 1
+
         if this.cache and this.cache[0] == n:
             this._log('_get_chunk', 'cached')
             return this.cache
@@ -87,6 +97,12 @@ class CachedFile():
         
         this.cache = (n, this.stream.read(this.chunk_size))
         this.join_str = b'' if isinstance(this.cache[1], bytes) else ''
+        this.total_read += len(this.cache[1])
+
+        if this.debug:
+            this.histo[n]['retrieved'] += 1
+
+        this._log('_get_chunk', 'total read %d' % this.total_read)
 
         return this.cache
 
@@ -96,7 +112,8 @@ class CachedFile():
 
 
     def _log(this, mtype, *args):
-        print(this, datetime.now(), mtype, *args, file=stderr, flush=True)
+        if this.debug:
+            print(this, datetime.now(), mtype, *args, file=stderr, flush=True)
 
 def cached(f, chunk_size=10*1024):
     return CachedFile(f, chunk_size=chunk_size)

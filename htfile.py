@@ -99,7 +99,6 @@ class htfile():
     def _log(this, mtype, *args):
         print(this, datetime.now(), mtype, *args, file=stderr, flush=True)
 
-
 def htopen(url, mode='rb', cache=True, chunk_size=10*1024):
     if cache:
         return cached(htfile(url, mode=mode), chunk_size=chunk_size)
