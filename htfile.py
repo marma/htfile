@@ -1,108 +1,183 @@
-from requests import get,head
+from requests import Session,get,head
 from os import SEEK_SET, SEEK_CUR, SEEK_END
 from sys import stdin,stderr
 from datetime import datetime
-from cached import cached
+from io import RawIOBase,UnsupportedOperation,BufferedReader,TextIOWrapper
 
-class htfile():
-    def __init__(this, url, mode='rb', auth=None):
-        if 'r' not in mode:
-            raise Exception('mode must be \'r\' with at most one \'b\' for binary mode')
+# larger than usual buffer size due to GET operation being expensive
+DEFAULT_BUFFER_SIZE=10*1024
+seek_whence = { SEEK_SET:'SEEK_SET', SEEK_CUR:'SEEK_CUR', SEEK_END:'SEEK_END' }
 
-        this.url = url
-        this.mode = mode
-        this.auth = auth
-        this.position = 0
-        this.stream_position = 0
-        this.size = None
-        this.r = None
-        this.etag = None
-        this._position()
+def open(url, mode='r', auth=None, buffering=-1, encoding=None, headers={}, debug=False):
+    binary = mode[-1] == 'b'
 
-    def seek(this, offset, whence=SEEK_SET):
-        this._log('seek', this.position, offset, whence)
+    if mode[0] != 'r':
+        raise Exception('only read-only streams supported')
 
-        org_pos = this.position
-        if not isinstance(offset, int):
-            raise TypeError('offset must be int, not %s' % repr(type(offset)))
+    if binary:
+        if encoding != None:
+            raise ValueError('binary mode doesn\'t take an encoding argument')
+    
+        if buffering == 1:
+            raise ValueError('line buffering not supported in binary mode')
 
+    if not binary and buffering == 0:
+        raise ValueError('can\'t have unbuffered text I/O')
 
-        if whence == SEEK_SET:
-            this.position = offset
-        elif whence == SEEK_CUR:
-            this.position += offset
-        elif whence == SEEK_END:
-            this.position = this.size + offset
-        
-        if this.position < 0:
-            this.position = org_pos
-            raise ValueError('offset %d < 0' % this.position)
+    if not isinstance(buffering, int):
+        raise TypeError('an integer is required (got type %s)' % type(buffering).__name__)
 
-        return this.position
+    raw = HttpIO(url, auth=auth, headers=headers, debug=debug)
+    buf = raw
+
+    if buffering != 0:
+        buf = BufferedReader(raw, buffer_size=DEFAULT_BUFFER_SIZE if buffering < 2 else buffering)
+
+    return buf if binary else TextIOWrapper(buf, encoding)
 
 
-    def read(this, size=None):
-        this._log('read', size)
+class HttpIO(RawIOBase):
+    def __init__(self, url, auth=None, debug=False, headers={}):
+        self.url = url
+        self.auth = auth
+        self.debug = debug
+        self.headers = headers
+        self.position = 0
+        self.stream_position = 0
+        self.size = None
+        self.session = Session()
+        self.r = None
+        self.etag = None
 
-        if this.size is not None and this.position > this.size:
-            return b'' if 'b' in this.mode else ''
+        self._position()
+
+
+    def close(self):
+        if not self.closed:
+            try:
+                self.r.close()
+                self.session.close()
+            finally:
+                self.r = None
+                self.closed =True
+
+
+    def fileno(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed stream')
+
+        self._log('fileno', self.r.raw.fileno())
+
+        return self.r.raw.fileno()
+
+
+    def read(self, size=None):
+        self._log('read', size)
+
+        if self.size is not None and self.position > self.size:
+            return b''
 
         # reposition?
-        if this.r == None or this.stream_position != this.position:
-            this._position()
+        if self.r == None or self.stream_position != self.position:
+            self._position()
 
-
-        r = this.r.raw.read(size)
-        this.position += len(r)
-        this.stream_position = this.position
+        r = self.r.raw.read(size)
+        self.position += len(r)
+        self.stream_position = self.position
 
         return r
 
 
-    def tell(this):
-        this._log('tell', this.position)
-
-        return this.position
+    def readable(self):
+        return True
 
 
-    def close(this):
-        try:
-            this.r.close()
-            this.r = None
-        except:
-            pass
+    def readall(self):
+        self._log('readall')
+
+        # reposition?
+        if self.r == None or self.stream_position != self.position:
+            self._position()
+
+        return self.r.raw.readall()
 
 
-    def _position(this):
-        this._log('_position', 'position=%d, stream_position=%d' % (this.position, this.stream_position))
+    def readinto(self, b):
+        self._log(f'readinto len(b) = {len(b)}')
 
-        if this.r:
-            this.r.close()
+        # reposition?
+        if self.r == None or self.stream_position != self.position:
+            self._position()
+
+        return self.r.raw.readinto(b)
+
+
+    def seek(self, offset, whence=SEEK_SET):
+        if whence not in seek_whence.keys():
+            raise ValueError(f'whence {whence} not supported')
+
+        if not isinstance(offset, int):
+            raise TypeError(f'offset must be int, not {type(offset).__name__}')
+
+        pos = self.position
+        if whence == SEEK_SET:
+            pos = offset
+        elif whence == SEEK_CUR:
+            pos += offset
+        elif whence == SEEK_END:
+            if self.size == None:
+                raise UnsupportedOperation('end-relative seek not supported for this URL')
+
+            pos = self.size + offset
+        
+        if pos < 0:
+            raise ValueError(f'resulting offset {pos} < 0')
+
+        self._log(f'seek from {self.position} + ({offset}, {seek_whence[whence]}) -> {pos}')
+
+        self.position = pos
+
+        return self.position
+
+
+    def seekable(self):
+        return True
+
+
+    def tell(self):
+        self._log('tell', self.position)
+
+        return self.position
+
+
+    def writable(self):
+        return False
+
+
+    def _position(self):
+        self._log('_position', 'position=%d, stream_position=%d' % (self.position, self.stream_position))
+
+        if self.r:
+            self.r.close()
 
         headers = { 'Accept-Encoding': 'identity'}
-        headers.update({ 'Range': 'bytes=%d-' % this.position } if this.position != 0 else {})
+        headers.update({ 'Range': 'bytes=%d-' % self.position } if self.position != 0 else {})
+        headers.update(self.headers)
 
-        this.r = get(
-                    this.url,
-                    stream=True,
-                    headers=headers,
-                    auth=this.auth)
+        self.r = self.session.get(self.url, auth=self.auth, stream=True, headers=headers)
+        
+        if self.position != 0 and self.r.status_code != 206:
+            raise UnsupportedOperation('could not reposition for this URL')
 
-        if this.position == 0 and 'Content-Length' in this.r.headers:
-            this.size = int(this.r.headers['Content-Length'])
+        if self.position == 0 and 'Content-Length' in self.r.headers:
+            self.size = int(self.r.headers['Content-Length'])
 
-        this.accept_ranges = 'Accept-Ranges' in this.r.headers and 'bytes' in this.r.headers['Accept-Ranges']
-        this.r.raw.decode_content=True
-        this.stream_position = this.position
+        self.accept_ranges = 'bytes' in self.r.headers.get('Accept-Ranges', '')
+        self.r.raw.decode_content=True
+        self.stream_position = self.position
 
 
-    def _log(this, mtype, *args):
-        print(this, datetime.now(), mtype, *args, file=stderr, flush=True)
-
-def htopen(url, mode='rb', cache=True, chunk_size=10*1024):
-    if cache:
-        return cached(htfile(url, mode=mode), chunk_size=chunk_size)
-    else:
-        return htfile(url, mode=mode)
-
+    def _log(self, mtype, *args):
+        if self.debug:
+            print(self, datetime.now(), mtype, *args, file=stderr, flush=True)
 
