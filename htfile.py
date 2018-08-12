@@ -99,7 +99,13 @@ class HttpIO(RawIOBase):
         if self.r == None or self.stream_position != self.position:
             self._position()
 
-        return self.r.raw.readall()
+        ret = []
+        b = self.r.raw.read()
+        while b != b'':
+            ret += [ b ]
+            b = self.r.raw.read()
+
+        return b''.join(ret)
 
 
     def readinto(self, b):
