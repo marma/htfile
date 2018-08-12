@@ -59,19 +59,22 @@ class HttpIO(RawIOBase):
                 self.session.close()
             finally:
                 self.r = None
-                self.closed =True
+                super().close()
 
 
-    def fileno(self):
+#    def fileno(self):
+#        if self.closed:
+#            raise ValueError('I/O operation on closed stream')
+#
+#        self._log('fileno', self.r.raw.fileno())
+#
+#        return self.r.raw.fileno()
+
+
+    def read(self, size=-1):
         if self.closed:
-            raise ValueError('I/O operation on closed stream')
+            raise ValueError('I/O operation on closed file.')
 
-        self._log('fileno', self.r.raw.fileno())
-
-        return self.r.raw.fileno()
-
-
-    def read(self, size=None):
         self._log('read', size)
 
         if self.size is not None and self.position > self.size:
@@ -89,36 +92,42 @@ class HttpIO(RawIOBase):
 
 
     def readable(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
         return True
 
 
     def readall(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
         self._log('readall')
 
-        # reposition?
-        if self.r == None or self.stream_position != self.position:
-            self._position()
-
-        ret = []
-        b = self.r.raw.read()
-        while b != b'':
-            ret += [ b ]
-            b = self.r.raw.read()
-
-        return b''.join(ret)
+        return self.r.raw.read()
 
 
     def readinto(self, b):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
         self._log(f'readinto len(b) = {len(b)}')
 
         # reposition?
         if self.r == None or self.stream_position != self.position:
             self._position()
 
-        return self.r.raw.readinto(b)
+        n = self.r.raw.readinto(b)
+        self.position += n
+        self.stream_position = self.position
+
+        return n
 
 
     def seek(self, offset, whence=SEEK_SET):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
         if whence not in seek_whence.keys():
             raise ValueError(f'whence {whence} not supported')
 
@@ -147,10 +156,16 @@ class HttpIO(RawIOBase):
 
 
     def seekable(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
         return True
 
 
     def tell(self):
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+
         self._log('tell', self.position)
 
         return self.position
