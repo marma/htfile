@@ -84,7 +84,7 @@ class HttpIO(RawIOBase):
         if self.r == None or self.stream_position != self.position:
             self._position()
 
-        r = self.r.raw.read(size)
+        r = self.r.raw.read() if size == -1 else self.r.raw.read(size)
         self.position += len(r)
         self.stream_position = self.position
 
@@ -103,6 +103,10 @@ class HttpIO(RawIOBase):
             raise ValueError('I/O operation on closed file.')
 
         self._log('readall')
+
+        # reposition?
+        if self.r == None or self.stream_position != self.position:
+            self._position()
 
         return self.r.raw.read()
 
