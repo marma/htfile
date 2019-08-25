@@ -8,7 +8,7 @@ from io import RawIOBase,UnsupportedOperation,BufferedReader,TextIOWrapper
 DEFAULT_BUFFER_SIZE=10*1024
 seek_whence = { SEEK_SET:'SEEK_SET', SEEK_CUR:'SEEK_CUR', SEEK_END:'SEEK_END' }
 
-def open(url, mode='r', auth=None, buffering=-1, encoding=None, headers={}, debug=False):
+def open(url, mode='r', auth=None, buffering=-1, encoding=None, headers={}, download=False, debug=False):
     binary = mode[-1] == 'b'
 
     if mode[0] != 'r':
@@ -27,7 +27,7 @@ def open(url, mode='r', auth=None, buffering=-1, encoding=None, headers={}, debu
     if not isinstance(buffering, int):
         raise TypeError('an integer is required (got type %s)' % type(buffering).__name__)
 
-    raw = HttpIO(url, auth=auth, headers=headers, debug=debug)
+    raw = HttpIO(url, auth=auth, headers=headers, download=download, debug=debug)
     buf = raw
 
     if buffering != 0:

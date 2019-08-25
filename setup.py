@@ -10,6 +10,6 @@ setup(
     author='Martin Malmsten',
     author_email='martin@martinmalmsten.net',
     url='https://github.com/marma/htfile',
-    install_requires=[ 'requests>=2.18.4' ],
+    install_requires=[ 'requests>=2.18' ],
     packages=[ 'htfile' ])
 
